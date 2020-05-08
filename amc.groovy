@@ -318,7 +318,34 @@ if (input.size() == 0) {
 	return
 }
 
+// Convert to mp4 here
+orphanedFiles = []
+input = input.collect{ f ->
+	if (f.hasExtension('mp4')) {
+		log.finest "Already mp4, no need to convert"
+		return f
+	} else {
+		log.warning "Not an mp4, converting..."
+        a = getMediaInfo(f, '{vc}')
+        log.finest "Source video codec: $a"
+        a = getMediaInfo(f, '{ac}')
+        log.finest "Source audio codec: $a"
+		vc = getMediaInfo(f, '{vc}') =~ /[hx]26[45]|AVC|HEVC/ ? 'copy' : 'h264'
+		ac = getMediaInfo(f, '{ac}') =~ /AAC|E?AC3/ ? 'copy' : 'aac'
+		log.finest "vc: $vc, ac: $ac"
 
+		newPath = "$f.dir/${f.nameWithoutExtension}.mp4"
+		nf = new File(newPath)
+
+		cmd = "ffmpeg -hide_banner -y -i \"$f\" -codec:v $vc -codec:a $ac -movflags faststart -threads 0 \"$nf\""
+		log.fine "Execute: $cmd"
+		execute(cmd)
+
+		orphanedFiles += f
+		temporaryFiles += nf
+		return nf
+	}
+}
 
 // group episodes/movies and rename according to Plex standards
 def groups = input.groupBy{ f ->
@@ -704,6 +731,11 @@ if (clean) {
 
 	// deleting remaining files only makes sense after moving files
 	if ('MOVE'.equalsIgnoreCase(_args.action)) {
+		// delete orphaned files from media conversion
+		orphanedFiles.findAll{ it.isFile() }.sort().each{
+			log.finest "Delete $it"
+			it.delete()
+		}
 		def cleanerInput = args.size() > 0 ? args : ut.kind == 'multi' && ut.dir ? [ut.dir as File] : []
 		cleanerInput = cleanerInput.findAll{ f -> f.exists() }
 		if (cleanerInput.size() > 0) {
